@@ -1,0 +1,11 @@
+<script type="module">
+    import {Crypto} from "./src/api.js"
+    const c = new Crypto("<>");
+    await c.register();
+    let encrypted = await c.encrypt("Hello!");
+    console.log(encrypted);
+    encrypted.get(async e => {
+        let decrypted = await c.decrypt(e);
+        decrypted.get(d => console.log(d));
+    });
+</script>
