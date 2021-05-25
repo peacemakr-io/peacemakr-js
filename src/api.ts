@@ -227,8 +227,12 @@ class ApiClient {
      */
     private async get(uri: string): Promise<Result<Response, Error>> {
         try {
+            const requestHeaders: HeadersInit = new Headers();
+            requestHeaders.set("Authorization", this.apiKey);
+            requestHeaders.set("Content-Type", "application/json");
+            requestHeaders.set("Accept", "application/json, text/plain, */*");
             let res = await fetch(this.baseURL + uri, {
-                headers: [["Authorization", this.apiKey]],
+                headers: requestHeaders,
                 method: "GET",
                 mode: 'cors'
             });
@@ -243,8 +247,12 @@ class ApiClient {
      */
     private async post(uri: string, body: string): Promise<Result<Response, Error>> {
         try {
+            const requestHeaders: HeadersInit = new Headers();
+            requestHeaders.set("Authorization", this.apiKey);
+            requestHeaders.set("Content-Type", "application/json");
+            requestHeaders.set("Accept", "application/json, text/plain, */*");
             let res = await fetch(this.baseURL + uri, {
-                headers: [["Authorization", this.apiKey], ["Content-Type", "application/json"]],
+                headers: requestHeaders,
                 method: "POST",
                 mode: 'cors',
                 body: body,
@@ -642,6 +650,7 @@ class Crypto {
     }
 
     // TODO: signOnly/verifyOnly
+
 }
 
 export {Crypto};
