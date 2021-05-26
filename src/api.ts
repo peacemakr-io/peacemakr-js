@@ -649,7 +649,54 @@ class Crypto {
         return ok(decrypted.plaintext.data);
     }
 
-    // TODO: signOnly/verifyOnly
+    async signOnly(message: string): Promise<Result<string, Error>> {
+        if (!this.bootstrapped()) {
+            return errString("not bootstrapped");
+        }
+
+        if (!message || message.length === 0) {
+            return errString("Cannot sign empty input");
+        }
+
+        let aad: CiphertextAAD = {
+            cryptoKeyID: "",
+            senderKeyID: this.client.preferredPublicKeyId,
+        }
+        let plaintext: Plaintext = {
+            data: message,
+            aad: JSON.stringify(aad),
+        }
+        let blob = this.ctx.get_plaintext_blob(plaintext);
+        if (!this.ctx.sign(this.keypair, plaintext, this.module.DigestAlgorithm.SHA_256, blob)) {
+            return errString("Signing failed");
+        }
+        let serialized = this.ctx.serialize(this.module.DigestAlgorithm.SHA_256, blob);
+        return ok(serialized);
+    }
+
+
+    async verifyOnly(signedBlob: string): Promise<Result<string, Error>> {
+        if (!this.bootstrapped()) {
+            return errString("not bootstrapped");
+        }
+
+        if (!signedBlob || signedBlob.length === 0) {
+            return errString("Cannot verify empty input");
+        }
+
+        let deserialized = this.ctx.deserialize(signedBlob);
+        let plaintext = this.ctx.extract_plaintext_blob(deserialized.ciphertext);
+        let aadOnly: Plaintext = this.ctx.extract_unverified_aad(signedBlob);
+        let aadObj: CiphertextAAD = JSON.parse(aadOnly.aad);
+        let r = await this.getAsymmetricKey(aadObj.senderKeyID);
+        let verifyKey: Key = r.unwrap(err => console.log(err));
+
+        if (!this.ctx.verify(verifyKey, plaintext, deserialized.ciphertext)) {
+            return errString("key verification failed");
+        }
+
+        return ok(plaintext.data);
+    }
 
 }
 

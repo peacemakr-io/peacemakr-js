@@ -8,4 +8,11 @@
         let decrypted = await c.decrypt(e);
         decrypted.get(d => console.log(d));
     });
+
+    let signed = await c.signOnly("SIGNME");
+    console.log(signed);
+    signed.get(async e => {
+        let verified = await c.verifyOnly(e);
+        verified.get(d => console.log(d));
+    });
 </script>
