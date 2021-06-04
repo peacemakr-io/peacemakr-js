@@ -369,10 +369,10 @@ class Crypto {
                 if (this.storage.exists(ClientPersisterKey)) {
                     this.client = JSON.parse(this.storage.get(ClientPersisterKey));
                 }
-                // if (this.storage.exists(PrivPersisterKey)) {
-                //     let priv = this.storage.get(PrivPersisterKey);
-                //     this.keypair = this.module.Key.from_bytes(this.module.SymmetricCipher.CHACHA20_POLY1305, priv);
-                // }
+                if (this.storage.exists(PrivPersisterKey)) {
+                    let priv = this.storage.get(PrivPersisterKey);
+                    this.keypair = this.module.Key.from_bytes(this.module.SymmetricCipher.CHACHA20_POLY1305, priv);
+                }
             }
         });
     }
