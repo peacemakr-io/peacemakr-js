@@ -1,4 +1,5 @@
 import Module from "./corecrypto.js";
+import {Persister} from "./persister";
 
 interface Contact {
     email: string,
@@ -324,39 +325,64 @@ type AsymmetricCipher = Module.AsymmetricCipher;
 type SymmetricCipher = Module.SymmetricCipher;
 type MessageDigestAlgorithm = Module.DigestAlgorithm;
 
+interface PersistedSymmetricKey {
+    key: string,
+    cipher: EncryptionAlgorithm,
+}
+
+const OrgPersisterKey = "io.peacemakr.org";
+const CryptoConfigPersisterKey = "io.peacemakr.crypto_config";
+const ClientPersisterKey = "io.peacemakr.client";
+const PrivPersisterKey = "io.peacemakr.priv";
+
 class Crypto {
     private module: Module;
-    private ctx: Module.CryptoContext
+    private ctx: CryptoContext
     private apiClient: ApiClient;
 
-    /**
-     * Why are these just class members instead of in the persister? Because the persister won't
-     * survive a restart/page reload anyway - there's no real disk here. localStorage and sessionStorage are insecure.
-     */
-
-    private keypair: Key = undefined;
+    private keypair?: Key;
     private keypairAlg: AsymmetricCipher;
     private client: Client;
-    private org_: Org | undefined = undefined;
-    private cryptoConfig_: CryptoConfig | undefined = undefined;
+    private org_?: Org;
+    private cryptoConfig_?: CryptoConfig;
     private keyCache: Map<string, Key>;
 
-    constructor(apiKey: string) {
+    private storage: Persister | null;
+
+    constructor(apiKey: string, storage: Persister | null) {
+        this.apiClient = new ApiClient(apiKey);
+        this.keyCache = new Map<string, Key>();
+
+        this.storage = storage;
+
         Module().then(m => {
             this.module = m;
             this.ctx = m.CryptoContext.init();
-        });
 
-        this.apiClient = new ApiClient(apiKey);
-        this.keyCache = new Map<string, Key>();
+            if (this.storage != null) {
+                if (this.storage.exists(OrgPersisterKey)) {
+                    this.org_ = JSON.parse(this.storage.get(OrgPersisterKey));
+                }
+                if (this.storage.exists(CryptoConfigPersisterKey)) {
+                    this.cryptoConfig_ = JSON.parse(this.storage.get(CryptoConfigPersisterKey));
+                }
+                if (this.storage.exists(ClientPersisterKey)) {
+                    this.client = JSON.parse(this.storage.get(ClientPersisterKey));
+                }
+                // if (this.storage.exists(PrivPersisterKey)) {
+                //     let priv = this.storage.get(PrivPersisterKey);
+                //     this.keypair = this.module.Key.from_bytes(this.module.SymmetricCipher.CHACHA20_POLY1305, priv);
+                // }
+            }
+        });
     }
 
     private bootstrapped(): boolean {
-        return this.org_ !== undefined && this.cryptoConfig_ !== undefined;
+        return this.org_ != null && this.cryptoConfig_ != null;
     }
 
     private registered(): boolean {
-        return this.keypair !== undefined && this.client !== undefined;
+        return this.keypair != null && this.client != null;
     }
 
     private async genKeyPair(): Promise<PublicKey> {
@@ -398,6 +424,11 @@ class Crypto {
 
         let pub = this.keypair.get_pub_pem();
 
+        if (this.storage) {
+            let priv = this.keypair.get_priv_pem();
+            this.storage.set(PrivPersisterKey, priv);
+        }
+
         return {
             creationTime: Math.floor(Date.now() / 1000), // unix timestamp in seconds
             encoding: "pem",
@@ -419,6 +450,11 @@ class Crypto {
         rc.get(cc => {
             this.cryptoConfig_ = cc
         });
+
+        if (this.storage) {
+            this.storage.set(OrgPersisterKey, JSON.stringify(this.org_));
+            this.storage.set(CryptoConfigPersisterKey, JSON.stringify(this.cryptoConfig_));
+        }
     }
 
     private translateAlg(alg: EncryptionAlgorithm): SymmetricCipher {
@@ -455,13 +491,34 @@ class Crypto {
         let out;
         if (this.keyCache.has(keyId)) {
             out = this.keyCache.get(keyId);
+        } else if (this.storage != null && this.storage.exists(keyId)) {
+            // This is a public key so we can get the pem and do from_bytes
+            let pem = this.storage.get(keyId);
+            out = this.module.Key.from_pem(this.module.SymmetricCipher.CHACHA20_POLY1305, pem, "");
+            this.keyCache.set(keyId, out);
         } else {
             let pubkey = await this.apiClient.getPublicKey(keyId);
             let keyobj = pubkey.unwrap(err => console.log(err));
             out = this.module.Key.from_pem(this.module.SymmetricCipher.CHACHA20_POLY1305, (keyobj as PublicKey).key, "");
+            if (this.storage) {
+                this.storage.set(keyId, (keyobj as PublicKey).key);
+            }
             this.keyCache.set(keyId, out);
         }
         return ok(out);
+    }
+
+    private keyFromB64(str: string): Uint8Array {
+        let keysAsInts = atob(str);
+        const keyByteArray = new Array(keysAsInts.length);
+        for (let i = 0; i < keysAsInts.length; i++) {
+            keyByteArray[i] = keysAsInts.charCodeAt(i);
+        }
+        return new Uint8Array(keyByteArray);
+    }
+
+    private keyToB64(k: Uint8Array): string {
+        return btoa(String.fromCharCode.apply(null, k));
     }
 
     private async downloadKeys(keyIds?: string[]): Promise<Result<void, Error>> {
@@ -496,7 +553,7 @@ class Crypto {
                 }
 
                 let offset = 0;
-                let keysAsBytes = atob(decrypted.plaintext.data);
+                const keysAsBytes = this.keyFromB64(decrypted.plaintext.data);
                 let cc: CryptoConfig = this.cryptoConfig_ as CryptoConfig;
                 for (let keyid of key.keyIds) {
                     let useDomain = cc.symmetricKeyUseDomains.find(elt => elt.encryptionKeyIds.indexOf(keyid) !== -1);
@@ -505,7 +562,14 @@ class Crypto {
                     }
 
                     let cfg: SymmetricCipher = this.translateAlg(useDomain.symmetricKeyEncryptionAlg);
-                    let currentKey: string = keysAsBytes.substring(offset, offset + key.keyLength);
+                    let currentKey = keysAsBytes.slice(offset, offset + key.keyLength);
+                    if (this.storage) {
+                        let storageKey: PersistedSymmetricKey = {
+                            key: this.keyToB64(currentKey),
+                            cipher: useDomain.symmetricKeyEncryptionAlg,
+                        }
+                        this.storage.set(keyid, JSON.stringify(storageKey));
+                    }
                     this.keyCache.set(keyid, this.module.Key.from_bytes(cfg, currentKey));
                     offset += key.keyLength;
                 }
@@ -514,15 +578,25 @@ class Crypto {
         });
     }
 
-    private async getKey(keyId: string): Promise<Result<Key, Error>> {
+    private async getKey(keyId: string, noDownload: boolean = false): Promise<Result<Key, Error>> {
         if (this.keyCache.has(keyId)) {
-            return this.keyCache.get(keyId);
+            return ok(this.keyCache.get(keyId));
+        } else if (this.storage != null && this.storage.exists(keyId)) {
+            let storageKey: PersistedSymmetricKey = JSON.parse(this.storage.get(keyId));
+            let keyBytes = this.keyFromB64(storageKey.key);
+            let outKey = this.module.Key.from_bytes(this.translateAlg(storageKey.cipher), keyBytes);
+            this.keyCache.set(keyId, outKey);
+            return ok(outKey);
         }
 
-        let download = await this.downloadKeys([keyId]);
-        return download.get(_ => {
-            return this.keyCache.get(keyId);
-        });
+        if (!noDownload) {
+            let download = await this.downloadKeys([keyId]);
+            if (!download.ok()) {
+                return err(download.err() as Error);
+            }
+        }
+
+        return this.getKey(keyId, true);
     }
 
     async register() {
@@ -547,6 +621,10 @@ class Crypto {
         });
         if (!r.ok()) {
             console.log("failed to register new client: ", r.err())
+        }
+
+        if (this.storage) {
+            this.storage.set(ClientPersisterKey, JSON.stringify(this.client));
         }
     }
 
@@ -575,7 +653,7 @@ class Crypto {
 
         let chosenDomain;
         if (useDomain) {
-            chosenDomain = validDomains.find(elt => elt.name === useDomain);
+            chosenDomain = validDomains.find(elt => elt.name === useDomain || elt.id == useDomain);
         } else {
             chosenDomain = randomElement(validDomains);
         }
@@ -585,13 +663,7 @@ class Crypto {
         }
 
         let keyId: string = randomElement(chosenDomain.encryptionKeyIds);
-        if (!this.keyCache.has(keyId)) {
-            let r = await this.downloadKeys([keyId]);
-            if (!r.ok()) {
-                return err(r.err() as Error);
-            }
-        }
-        let key: Key = this.keyCache.get(keyId);
+        let key: Key = (await this.getKey(keyId)).unwrap(e => console.log(e));
         let digest = this.translateDigest(chosenDomain.digestAlgorithm);
 
         let aad: CiphertextAAD = {
@@ -627,7 +699,7 @@ class Crypto {
         let aadOnly: Plaintext = this.ctx.extract_unverified_aad(encrypted);
         let aadObj: CiphertextAAD = JSON.parse(aadOnly.aad);
         let validDomains = this.validDomains();
-        let useDomain = validDomains.find(elt => elt.encryptionKeyIds.find(id => id === aadObj.cryptoKeyID) !== undefined);
+        let useDomain = validDomains.find(elt => elt.encryptionKeyIds.find(id => id === aadObj.cryptoKeyID) != null);
         if (!useDomain) {
             return errString("Could not find an appropriate use domain");
         }
@@ -639,7 +711,7 @@ class Crypto {
         let r = await this.getAsymmetricKey(aadObj.senderKeyID);
         let verifyKey: Key = r.unwrap(err => console.log(err));
 
-        let key = await this.getKey(aadObj.cryptoKeyID);
+        let key: Key = (await this.getKey(aadObj.cryptoKeyID)).unwrap(e => console.log(e));
         let deser: DeserializeResult = this.ctx.deserialize(encrypted);
         let decrypted: DecryptResult = this.ctx.decrypt(key, deser.ciphertext);
         if (decrypted.needs_verify && !this.ctx.verify(verifyKey, decrypted.plaintext, deser.ciphertext)) {

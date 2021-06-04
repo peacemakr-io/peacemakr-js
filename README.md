@@ -22,8 +22,10 @@ python3 -m http.server 8082
 Note: Sometimes browser needs to be hard refreshed to load the changes.
 
 ## RoadMap
-- [ ] SignOnly and VerifyOnly
-- [ ] Persistent storage
+- [x] SignOnly and VerifyOnly
+- [x] Persistent storage
+- [ ] Rotate client asymmetric keys
+- [ ] Clean up error handling
 - [ ] Unit test
 - [ ] Deployment
 - [ ] CI/CD automation with github actions

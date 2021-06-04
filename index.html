@@ -1,8 +1,13 @@
 <script type="module">
     import {Crypto} from "./src/api.js"
-    const c = new Crypto("<>");
+    import {LocalStoragePersister} from "./src/persister.js"
+
+    // *****WARNING*****: DO NOT USE LocalStoragePersister for any purpose other than testing locally
+    let persister = new LocalStoragePersister();
+    const c = new Crypto("<>", persister);
     await c.register();
-    let encrypted = await c.encrypt("Hello!");
+
+    let encrypted = await c.encrypt("Hello!", "default");
     console.log(encrypted);
     encrypted.get(async e => {
         let decrypted = await c.decrypt(e);
