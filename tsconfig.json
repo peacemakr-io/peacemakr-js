@@ -8,9 +8,17 @@
     ],
     "removeComments": false,
     "noImplicitReturns": true,
-    "sourceMap": true,
     "target": "ES6",
     "esModuleInterop": true,
-    "strictNullChecks": true
-  }
+    "strictNullChecks": true,
+    "declaration": true,
+    "outDir": "dist"
+  },
+  "exclude": [
+    "dist"
+  ],
+  "files": [
+    "src/api.ts",
+    "src/persister.ts"
+  ]
 }

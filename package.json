@@ -1,0 +1,15 @@
+{
+  "name": "peacemakr-js",
+  "version": "0.1.0",
+  "description": "Peacemakr client cryptography library",
+  "main": "dist/api.js",
+  "types": "dist/api.d.ts",
+  "scripts": {
+    "build": "tsc && cp src/corecrypto.* dist"
+  },
+  "author": "https://peacemakr.io",
+  "license": "Apache 2.0",
+  "devDependencies": {
+    "typescript": "^4.1.3"
+  }
+}

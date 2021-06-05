@@ -702,8 +702,8 @@ class Crypto {
     }
 
     async decrypt(encrypted: string): Promise<Result<string, Error>> {
-        if (!this.bootstrapped()) {
-            return errString("not bootstrapped");
+        if (!this.registered || !this.bootstrapped()) {
+            return errString("not registered or bootstrapped");
         }
         let aadOnly: Plaintext = this.ctx.extract_unverified_aad(encrypted);
         let aadObj: CiphertextAAD = JSON.parse(aadOnly.aad);
@@ -739,8 +739,8 @@ class Crypto {
     }
 
     async signOnly(message: string): Promise<Result<string, Error>> {
-        if (!this.bootstrapped()) {
-            return errString("not bootstrapped");
+        if (!this.registered() || !this.bootstrapped()) {
+            return errString("not registered or bootstrapped");
         }
 
         if (!message || message.length === 0) {
@@ -765,8 +765,8 @@ class Crypto {
 
 
     async verifyOnly(signedBlob: string): Promise<Result<string, Error>> {
-        if (!this.bootstrapped()) {
-            return errString("not bootstrapped");
+        if (!this.registered() || !this.bootstrapped()) {
+            return errString("not registered or bootstrapped");
         }
 
         if (!signedBlob || signedBlob.length === 0) {
