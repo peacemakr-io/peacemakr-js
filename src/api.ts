@@ -147,8 +147,6 @@ interface IResult<T, E> {
     get<A>(f: (t: T) => A): Result<A, E>;
 
     andThen<U, F>(f: (t: T) => Promise<Result<U, F>>): Promise<Result<U, E | F>>;
-
-    unwrap(f: (e: E) => void): T | undefined;
 }
 
 class Ok<T, E> implements IResult<T, E> {
@@ -177,10 +175,6 @@ class Ok<T, E> implements IResult<T, E> {
     async andThen<U, F>(f: (t: T) => Promise<Result<U, F>>): Promise<Result<U, E | F>> {
         return f(this.v);
     }
-
-    unwrap(f: (e: E) => void): T | undefined {
-        return this.v
-    }
 }
 
 class Err<T, E> {
@@ -206,11 +200,6 @@ class Err<T, E> {
 
     async andThen<U, F>(f: (t: T) => Promise<Result<U, F>>): Promise<Result<U, E | F>> {
         return err(this.v);
-    }
-
-    unwrap(f: (e: E) => void): T | undefined {
-        f(this.v);
-        return undefined;
     }
 }
 
@@ -440,21 +429,29 @@ class Crypto {
         };
     }
 
-    private async bootstrap() {
+    private async bootstrap(): Promise<Result<void, Error>> {
         let ro = await this.apiClient.getOrg();
-        ro.get(org => {
+        let res = ro.get(org => {
             this.org_ = org
         });
+        if (!res.ok()) {
+            return res;
+        }
 
         let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
-        rc.get(cc => {
+        res = rc.get(cc => {
             this.cryptoConfig_ = cc
         });
+        if (!res.ok()) {
+            return res;
+        }
 
         if (this.storage) {
             this.storage.set(OrgPersisterKey, JSON.stringify(this.org_));
             this.storage.set(CryptoConfigPersisterKey, JSON.stringify(this.cryptoConfig_));
         }
+
+        return ok();
     }
 
     private translateAlg(alg: EncryptionAlgorithm): SymmetricCipher {
@@ -498,17 +495,21 @@ class Crypto {
             this.keyCache.set(keyId, out);
         } else {
             let pubkey = await this.apiClient.getPublicKey(keyId);
-            let keyobj = pubkey.unwrap(err => console.log(err));
-            out = this.module.Key.from_pem(this.module.SymmetricCipher.CHACHA20_POLY1305, (keyobj as PublicKey).key, "");
-            if (this.storage) {
-                this.storage.set(keyId, (keyobj as PublicKey).key);
+            let e = pubkey.get(pk => {
+                out = this.module.Key.from_pem(this.module.SymmetricCipher.CHACHA20_POLY1305, pk.key, "");
+                if (this.storage) {
+                    this.storage.set(keyId, pk.key);
+                }
+                this.keyCache.set(keyId, out);
+            });
+            if (!e.ok()) {
+                return e;
             }
-            this.keyCache.set(keyId, out);
         }
         return ok(out);
     }
 
-    private keyFromB64(str: string): Uint8Array {
+    private static keyFromB64(str: string): Uint8Array {
         let keysAsInts = atob(str);
         const keyByteArray = new Array(keysAsInts.length);
         for (let i = 0; i < keysAsInts.length; i++) {
@@ -517,7 +518,7 @@ class Crypto {
         return new Uint8Array(keyByteArray);
     }
 
-    private keyToB64(k: Uint8Array): string {
+    private static keyToB64(k: Uint8Array): string {
         return btoa(String.fromCharCode.apply(null, k));
     }
 
@@ -534,44 +535,48 @@ class Crypto {
                 let ciphertext = key.packagedCiphertext;
                 let aadOnly: Plaintext = this.ctx.extract_unverified_aad(ciphertext);
                 let aadObj: CiphertextAAD = JSON.parse(aadOnly.aad);
-                let r = await this.getAsymmetricKey(aadObj.senderKeyID);
-                let verifyKey: Key = r.unwrap(err => console.log(err));
-
-                let decryptKey = this.keypair;
-                if (this.keypairAlg === this.module.AsymmetricCipher.ECDH_P256 ||
-                    this.keypairAlg === this.module.AsymmetricCipher.ECDH_P384 ||
-                    this.keypairAlg === this.module.AsymmetricCipher.ECDH_P521) {
-                    decryptKey = this.module.Key.ecdh_keygen(this.module.SymmetricCipher.CHACHA20_POLY1305, this.keypair, verifyKey);
-                }
-
-                let deser: DeserializeResult = this.ctx.deserialize(ciphertext);
-                let decrypted: DecryptResult = this.ctx.decrypt(decryptKey, deser.ciphertext);
-                if (decrypted.needs_verify) {
-                    if (!this.ctx.verify(verifyKey, decrypted.plaintext, deser.ciphertext)) {
-                        return errString("key verification failed");
-                    }
-                }
-
-                let offset = 0;
-                const keysAsBytes = this.keyFromB64(decrypted.plaintext.data);
-                let cc: CryptoConfig = this.cryptoConfig_ as CryptoConfig;
-                for (let keyid of key.keyIds) {
-                    let useDomain = cc.symmetricKeyUseDomains.find(elt => elt.encryptionKeyIds.indexOf(keyid) !== -1);
-                    if (!useDomain) {
-                        return errString("Could not find appropriate use domain");
+                let asymmKey = await this.getAsymmetricKey(aadObj.senderKeyID);
+                let e = asymmKey.get(verifyKey => {
+                    let decryptKey = this.keypair;
+                    if (this.keypairAlg === this.module.AsymmetricCipher.ECDH_P256 ||
+                        this.keypairAlg === this.module.AsymmetricCipher.ECDH_P384 ||
+                        this.keypairAlg === this.module.AsymmetricCipher.ECDH_P521) {
+                        decryptKey = this.module.Key.ecdh_keygen(this.module.SymmetricCipher.CHACHA20_POLY1305, this.keypair, verifyKey);
                     }
 
-                    let cfg: SymmetricCipher = this.translateAlg(useDomain.symmetricKeyEncryptionAlg);
-                    let currentKey = keysAsBytes.slice(offset, offset + key.keyLength);
-                    if (this.storage) {
-                        let storageKey: PersistedSymmetricKey = {
-                            key: this.keyToB64(currentKey),
-                            cipher: useDomain.symmetricKeyEncryptionAlg,
+                    let deser: DeserializeResult = this.ctx.deserialize(ciphertext);
+                    let decrypted: DecryptResult = this.ctx.decrypt(decryptKey, deser.ciphertext);
+                    if (decrypted.needs_verify) {
+                        if (!this.ctx.verify(verifyKey, decrypted.plaintext, deser.ciphertext)) {
+                            return errString("key verification failed");
                         }
-                        this.storage.set(keyid, JSON.stringify(storageKey));
                     }
-                    this.keyCache.set(keyid, this.module.Key.from_bytes(cfg, currentKey));
-                    offset += key.keyLength;
+
+                    let offset = 0;
+                    const keysAsBytes = Crypto.keyFromB64(decrypted.plaintext.data);
+                    let cc: CryptoConfig = this.cryptoConfig_ as CryptoConfig;
+                    for (let keyid of key.keyIds) {
+                        let useDomain = cc.symmetricKeyUseDomains.find(elt => elt.encryptionKeyIds.indexOf(keyid) !== -1);
+                        if (!useDomain) {
+                            return errString("Could not find appropriate use domain");
+                        }
+
+                        let cfg: SymmetricCipher = this.translateAlg(useDomain.symmetricKeyEncryptionAlg);
+                        let currentKey = keysAsBytes.slice(offset, offset + key.keyLength);
+                        if (this.storage) {
+                            let storageKey: PersistedSymmetricKey = {
+                                key: Crypto.keyToB64(currentKey),
+                                cipher: useDomain.symmetricKeyEncryptionAlg,
+                            }
+                            this.storage.set(keyid, JSON.stringify(storageKey));
+                        }
+                        this.keyCache.set(keyid, this.module.Key.from_bytes(cfg, currentKey));
+                        offset += key.keyLength;
+                    }
+                    return ok();
+                });
+                if (!e.ok()) {
+                    return e;
                 }
             }
             return ok();
@@ -583,7 +588,7 @@ class Crypto {
             return ok(this.keyCache.get(keyId));
         } else if (this.storage != null && this.storage.exists(keyId)) {
             let storageKey: PersistedSymmetricKey = JSON.parse(this.storage.get(keyId));
-            let keyBytes = this.keyFromB64(storageKey.key);
+            let keyBytes = Crypto.keyFromB64(storageKey.key);
             let outKey = this.module.Key.from_bytes(this.translateAlg(storageKey.cipher), keyBytes);
             this.keyCache.set(keyId, outKey);
             return ok(outKey);
@@ -599,14 +604,14 @@ class Crypto {
         return this.getKey(keyId, true);
     }
 
-    async register() {
+    async register(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
         if (!this.registered() || !this.bootstrapped()) {
             await this.bootstrap();
         } else if (this.registered()) {
             // Nothing to return, already registered
-            return;
+            return ok();
         }
         let pubkey = await this.genKeyPair();
         let c = await this.apiClient.addClient({
@@ -620,12 +625,13 @@ class Crypto {
             this.client = client;
         });
         if (!r.ok()) {
-            console.log("failed to register new client: ", r.err())
+            return r;
         }
 
         if (this.storage) {
             this.storage.set(ClientPersisterKey, JSON.stringify(this.client));
         }
+        return ok();
     }
 
     /**
@@ -663,7 +669,6 @@ class Crypto {
         }
 
         let keyId: string = randomElement(chosenDomain.encryptionKeyIds);
-        let key: Key = (await this.getKey(keyId)).unwrap(e => console.log(e));
         let digest = this.translateDigest(chosenDomain.digestAlgorithm);
 
         let aad: CiphertextAAD = {
@@ -676,20 +681,24 @@ class Crypto {
             aad: JSON.stringify(aad),
         }
         let rng = new this.module.RandomDevice();
-        let encrypted = this.ctx.encrypt(key, plaintext, rng);
-        if (encrypted === 0) { // returns nullptr on failure
-            return errString("Encryption failed");
-        }
-        if (!this.ctx.sign(this.keypair, plaintext, digest, encrypted)) {
-            return errString("Signing failed");
-        }
-        let serialized = this.ctx.serialize(digest, encrypted);
-        if (serialized.length === 0) {
-            return errString("Serialization failed");
-        }
 
-        // Returns a string
-        return ok(serialized);
+        let k: Key = await this.getKey(keyId);
+        return k.get(key => {
+            let encrypted = this.ctx.encrypt(key, plaintext, rng);
+            if (encrypted === 0) { // returns nullptr on failure
+                return errString("Encryption failed");
+            }
+            if (!this.ctx.sign(this.keypair, plaintext, digest, encrypted)) {
+                return errString("Signing failed");
+            }
+            let serialized = this.ctx.serialize(digest, encrypted);
+            if (serialized.length === 0) {
+                return errString("Serialization failed");
+            }
+
+            // Returns a string
+            return serialized;
+        });
     }
 
     async decrypt(encrypted: string): Promise<Result<string, Error>> {
@@ -707,18 +716,26 @@ class Crypto {
             return errString("Use domain is not viable for decryption")
         }
 
-        // Get the verify key
-        let r = await this.getAsymmetricKey(aadObj.senderKeyID);
-        let verifyKey: Key = r.unwrap(err => console.log(err));
-
-        let key: Key = (await this.getKey(aadObj.cryptoKeyID)).unwrap(e => console.log(e));
         let deser: DeserializeResult = this.ctx.deserialize(encrypted);
-        let decrypted: DecryptResult = this.ctx.decrypt(key, deser.ciphertext);
-        if (decrypted.needs_verify && !this.ctx.verify(verifyKey, decrypted.plaintext, deser.ciphertext)) {
-            return errString("Verification failed");
-        }
+        let k: Key = await this.getKey(aadObj.cryptoKeyID);
+        return await k.get(async key => {
+            let decrypted: DecryptResult = this.ctx.decrypt(key, deser.ciphertext);
+            if (decrypted.needs_verify) {
+                // Get the verify key
+                let r = await this.getAsymmetricKey(aadObj.senderKeyID);
+                let v = r.get(verifyKey => {
+                    if (!this.ctx.verify(verifyKey, decrypted.plaintext, deser.ciphertext)) {
+                        return errString("Verification failed");
+                    }
+                    return ok();
+                });
+                if (!v.ok()) {
+                    return v;
+                }
+            }
 
-        return ok(decrypted.plaintext.data);
+            return ok(decrypted.plaintext.data);
+        });
     }
 
     async signOnly(message: string): Promise<Result<string, Error>> {
@@ -761,13 +778,13 @@ class Crypto {
         let aadOnly: Plaintext = this.ctx.extract_unverified_aad(signedBlob);
         let aadObj: CiphertextAAD = JSON.parse(aadOnly.aad);
         let r = await this.getAsymmetricKey(aadObj.senderKeyID);
-        let verifyKey: Key = r.unwrap(err => console.log(err));
+        return r.get(verifyKey => {
+            if (!this.ctx.verify(verifyKey, plaintext, deserialized.ciphertext)) {
+                return errString("key verification failed");
+            }
 
-        if (!this.ctx.verify(verifyKey, plaintext, deserialized.ciphertext)) {
-            return errString("key verification failed");
-        }
-
-        return ok(plaintext.data);
+            return plaintext.data;
+        });
     }
 
 }
