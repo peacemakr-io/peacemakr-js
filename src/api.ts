@@ -439,37 +439,49 @@ class Crypto {
         };
     }
 
+    /**
+     * returns true if current config is not null and config it out of date
+     * @param newConfig
+     * @returns boolean
+     */
+     private isCurrentCryptoConfigStale(newConfig: CryptoConfig): boolean {
+        if (this.cryptoConfig_) {
+            // TODO: Add check for TTL
+            if (newConfig.clientKeyBitlength !== (this.cryptoConfig_ as CryptoConfig).clientKeyBitlength ||
+                newConfig.clientKeyType !== (this.cryptoConfig_ as CryptoConfig).clientKeyType) {
+                        return true;
+                    }
+        }
+        return false;
+    }
     private async isCryptoConfigLatest(): Promise<boolean> {
         if (!this.cryptoConfig_) {
             return false;
         }
-        let latest = true;
+        let staled = false;
         let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
         let res = rc.get(cc => {
-            // TODO: Add check for TTL
-            if (cc.clientKeyBitlength !== (this.cryptoConfig_ as CryptoConfig).clientKeyBitlength ||
-                cc.clientKeyType !== (this.cryptoConfig_ as CryptoConfig).clientKeyType) {
-                    latest = false;
-                }
+            staled = this.isCurrentCryptoConfigStale(cc);
         });
-        return latest;
+        return staled;
     }
 
-    private async bootstrap(): Promise<Result<void, Error>> {
+    private async bootstrap(): Promise<Boolean> {
+        let staled = false;
         let ro = await this.apiClient.getOrg();
         let res = ro.get(org => {
             this.org_ = org
         });
         if (!res.ok()) {
-            return res;
+            return true;
         }
-
         let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
         res = rc.get(cc => {
+            staled = this.isCurrentCryptoConfigStale(cc);
             this.cryptoConfig_ = cc
         });
         if (!res.ok()) {
-            return res;
+            return true;
         }
 
         if (this.storage) {
@@ -477,7 +489,7 @@ class Crypto {
             this.storage.set(CryptoConfigPersisterKey, JSON.stringify(this.cryptoConfig_));
         }
 
-        return ok();
+        return staled;
     }
 
     private translateAlg(alg: EncryptionAlgorithm): SymmetricCipher {
@@ -662,26 +674,34 @@ class Crypto {
         return ok();
     }
 
+    private async rotateAsymmetricKeys(): Promise<Result<void, Error>> {
+        if (!this.registered() || !this.bootstrapped()) {
+            await this.bootstrap();
+        }
 
-    async sync(): Promise<Result<void, Error>>{
+        let pubkey: PublicKey = await this.genKeyPair();
+        let r = await this.apiClient.addClientPublicKey(this.client.id, pubkey);
+
+        let rc = r.get(pubkey => {
+            this.client.preferredPublicKeyId = pubkey.id;
+            this.client.publicKeys.push(pubkey);
+        });
+        if (!rc.ok()) {
+            return rc;
+        }
+        return ok();
+    }
+
+
+    async sync(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
-        let isCryptoConfigUpToDate = await this.isCryptoConfigLatest();
-        if (isCryptoConfigUpToDate) {
-            // Just pull down the org and crypto config again
-            await this.bootstrap();
-        } else {
-            // update the cryptoConfig
-            await this.bootstrap();
-            let pubkey: PublicKey = await this.genKeyPair();
-            let r = await this.apiClient.addClientPublicKey(this.client.id, pubkey);
-
-            let rc = r.get(pubkey => {
-                this.client.preferredPublicKeyId = pubkey.id;
-                this.client.publicKeys.push(pubkey);
-            });
-            if (!rc.ok()) {
-                return rc;
+        let isCryptoConfigStaled = await this.bootstrap();
+        if (isCryptoConfigStaled) {
+            // rotate the asymmetric keypair
+            let r = await this.rotateAsymmetricKeys();
+            if (!r.ok()) {
+                return r;
             }
         }
         // And download all keys again
