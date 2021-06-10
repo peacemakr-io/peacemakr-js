@@ -662,9 +662,6 @@ class Crypto {
         return ok();
     }
 
-    /**
-     * Don't need to update client asymmetric keys, this client is short-lived
-     */
 
     async sync(): Promise<Result<void, Error>>{
         await this.apiClient.health();
@@ -705,7 +702,7 @@ class Crypto {
 
         let chosenDomain;
         if (useDomain) {
-            chosenDomain = validDomains.find(elt => elt.name === useDomain || elt.id == useDomain);
+            chosenDomain = validDomains.find(elt => elt.name === useDomain || elt.id === useDomain);
         } else {
             chosenDomain = randomElement(validDomains);
         }
