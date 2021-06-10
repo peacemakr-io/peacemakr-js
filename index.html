@@ -2,10 +2,19 @@
     import {Crypto} from "./dist/api.js"
     import {LocalStoragePersister} from "./dist/persister.js"
 
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     // *****WARNING*****: DO NOT USE LocalStoragePersister for any purpose other than testing locally
     let persister = new LocalStoragePersister();
     const c = new Crypto("<>", persister);
     await c.register();
+
+    // uncomment this to test key rotation works in sync
+    // e.g. change crypto config key on admin portal
+    // await sleep(20000);
+    await c.sync();
 
     let encrypted = await c.encrypt("Hello!", "default");
     console.log(encrypted);

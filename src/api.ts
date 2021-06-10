@@ -287,6 +287,15 @@ class ApiClient {
         });
     }
 
+    public async addClientPublicKey(clientId: string, pubkey: PublicKey): Promise<Result<PublicKey, Error>> {
+        let r = await this.post(`/client/${encodeURIComponent(clientId)}/addPublicKey`, JSON.stringify(pubkey));
+
+        return r.andThen(async response => {
+            let pk: PublicKey = await response.json();
+            return ok(pk);
+        })
+    }
+
     public async getKeys(clientKeyId: string, requiredKeyIds: string[]): Promise<Result<EncryptedKey[], Error>> {
         let url = `/crypto/symmetric/${encodeURIComponent(clientKeyId)}`;
         if (requiredKeyIds.length !== 0) {
@@ -330,6 +339,7 @@ class Crypto {
     private apiClient: ApiClient;
 
     private keypair?: Key;
+    private keyCreationTime: TimeRanges;
     private keypairAlg: AsymmetricCipher;
     private client: Client;
     private org_?: Org;
@@ -427,6 +437,22 @@ class Crypto {
             owningClientId: "",
             owningOrgId: ""
         };
+    }
+
+    private async isCryptoConfigLatest(): Promise<boolean> {
+        if (!this.cryptoConfig_) {
+            return false;
+        }
+        let latest = true;
+        let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
+        let res = rc.get(cc => {
+            // TODO: Add check for TTL
+            if (cc.clientKeyBitlength !== (this.cryptoConfig_ as CryptoConfig).clientKeyBitlength ||
+                cc.clientKeyType !== (this.cryptoConfig_ as CryptoConfig).clientKeyType) {
+                    latest = false;
+                }
+        });
+        return latest;
     }
 
     private async bootstrap(): Promise<Result<void, Error>> {
@@ -607,7 +633,9 @@ class Crypto {
     async register(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
-        if (!this.registered() || !this.bootstrapped()) {
+        // check persisted cryptoConfig is update to date. if it's not, we should refetch and regenerate keys.
+        let isCryptoConfigUpToDate = await this.isCryptoConfigLatest();
+        if (!this.registered() || !this.bootstrapped() || !isCryptoConfigUpToDate) {
             await this.bootstrap();
         } else if (this.registered()) {
             // Nothing to return, already registered
@@ -638,12 +666,30 @@ class Crypto {
      * Don't need to update client asymmetric keys, this client is short-lived
      */
 
-    async sync() {
+    async sync(): Promise<Result<void, Error>>{
         await this.apiClient.health();
-        // Just pull down the org and crypto config again
-        await this.bootstrap();
+
+        let isCryptoConfigUpToDate = await this.isCryptoConfigLatest();
+        if (isCryptoConfigUpToDate) {
+            // Just pull down the org and crypto config again
+            await this.bootstrap();
+        } else {
+            // update the cryptoConfig
+            await this.bootstrap();
+            let pubkey: PublicKey = await this.genKeyPair();
+            let r = await this.apiClient.addClientPublicKey(this.client.id, pubkey);
+
+            let rc = r.get(pubkey => {
+                this.client.preferredPublicKeyId = pubkey.id;
+                this.client.publicKeys.push(pubkey);
+            });
+            if (!rc.ok()) {
+                return rc;
+            }
+        }
         // And download all keys again
         await this.downloadKeys();
+        return ok();
     }
 
     private validDomains(): UseDomain[] {

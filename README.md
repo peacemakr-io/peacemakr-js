@@ -8,7 +8,7 @@ npm install -g typescript
 ```
 ## Compile
 ```
-pushd src && tsc --build && popd
+tsc --build
 ```
 
 ## Run
