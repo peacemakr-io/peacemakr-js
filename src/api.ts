@@ -448,7 +448,8 @@ class Crypto {
     }
 
     /**
-     * returns true if current config is not null and config it out of date
+     * returns false if current config exists but out of date
+     * otherwise true
      * @param newConfig
      * @returns boolean
      */
