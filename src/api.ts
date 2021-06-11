@@ -444,30 +444,30 @@ class Crypto {
      * @param newConfig
      * @returns boolean
      */
-     private isCurrentCryptoConfigStale(newConfig: CryptoConfig): boolean {
+     private isCurrentCryptoConfigLatest(newConfig: CryptoConfig): boolean {
         if (this.cryptoConfig_) {
             // TODO: Add check for TTL
             if (newConfig.clientKeyBitlength !== (this.cryptoConfig_ as CryptoConfig).clientKeyBitlength ||
                 newConfig.clientKeyType !== (this.cryptoConfig_ as CryptoConfig).clientKeyType) {
-                        return true;
+                        return false;
                     }
         }
-        return false;
+        return true;
     }
     private async isCryptoConfigLatest(): Promise<boolean> {
-        if (!this.cryptoConfig_) {
+        if (!this.org_ || !this.cryptoConfig_) {
             return false;
         }
-        let staled = false;
+        let latest = true;
         let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
         let res = rc.get(cc => {
-            staled = this.isCurrentCryptoConfigStale(cc);
+            latest = this.isCurrentCryptoConfigLatest(cc);
         });
-        return staled;
+        return latest;
     }
 
     private async bootstrap(): Promise<Boolean> {
-        let staled = false;
+        let latest = false;
         let ro = await this.apiClient.getOrg();
         let res = ro.get(org => {
             this.org_ = org
@@ -477,7 +477,7 @@ class Crypto {
         }
         let rc = await this.apiClient.getCryptoConfig((this.org_ as Org).cryptoConfigId);
         res = rc.get(cc => {
-            staled = this.isCurrentCryptoConfigStale(cc);
+            latest = this.isCurrentCryptoConfigLatest(cc);
             this.cryptoConfig_ = cc
         });
         if (!res.ok()) {
@@ -489,7 +489,7 @@ class Crypto {
             this.storage.set(CryptoConfigPersisterKey, JSON.stringify(this.cryptoConfig_));
         }
 
-        return staled;
+        return latest;
     }
 
     private translateAlg(alg: EncryptionAlgorithm): SymmetricCipher {
@@ -642,6 +642,24 @@ class Crypto {
         return this.getKey(keyId, true);
     }
 
+    private async rotateAsymmetricKeys(): Promise<Result<void, Error>> {
+        if (!this.registered() || !this.bootstrapped()) {
+            await this.bootstrap();
+        }
+
+        let pubkey: PublicKey = await this.genKeyPair();
+        let r = await this.apiClient.addClientPublicKey(this.client.id, pubkey);
+
+        let rc = r.get(pubkey => {
+            this.client.preferredPublicKeyId = pubkey.id;
+            this.client.publicKeys.push(pubkey);
+        });
+        if (!rc.ok()) {
+            return rc;
+        }
+        return ok();
+    }
+
     async register(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
@@ -674,30 +692,11 @@ class Crypto {
         return ok();
     }
 
-    private async rotateAsymmetricKeys(): Promise<Result<void, Error>> {
-        if (!this.registered() || !this.bootstrapped()) {
-            await this.bootstrap();
-        }
-
-        let pubkey: PublicKey = await this.genKeyPair();
-        let r = await this.apiClient.addClientPublicKey(this.client.id, pubkey);
-
-        let rc = r.get(pubkey => {
-            this.client.preferredPublicKeyId = pubkey.id;
-            this.client.publicKeys.push(pubkey);
-        });
-        if (!rc.ok()) {
-            return rc;
-        }
-        return ok();
-    }
-
-
     async sync(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
-        let isCryptoConfigStaled = await this.bootstrap();
-        if (isCryptoConfigStaled) {
+        let isCryptoConfigLatest = await this.bootstrap();
+        if (!isCryptoConfigLatest) {
             // rotate the asymmetric keypair
             let r = await this.rotateAsymmetricKeys();
             if (!r.ok()) {
