@@ -24,8 +24,8 @@ Note: Sometimes browser needs to be hard refreshed to load the changes.
 ## RoadMap
 - [x] SignOnly and VerifyOnly
 - [x] Persistent storage
-- [ ] Rotate client asymmetric keys
-- [ ] Clean up error handling
+- [x] Rotate client asymmetric keys
+- [x] Clean up error handling
 - [ ] Unit test
 - [ ] Deployment
 - [ ] CI/CD automation with github actions
