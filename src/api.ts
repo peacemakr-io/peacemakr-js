@@ -364,6 +364,14 @@ class Crypto {
                 }
                 if (this.storage.exists(CryptoConfigPersisterKey)) {
                     this.cryptoConfig_ = JSON.parse(this.storage.get(CryptoConfigPersisterKey));
+                    // check persisted cryptoConfig is update to date. if it's not, we should refetch and regenerate keys.
+                    this.isCryptoConfigLatest().then(
+                        isLatest => {
+                            if (!isLatest) {
+                                this.rotateAsymmetricKeys();
+                            }
+                        }
+                    );
                 }
                 if (this.storage.exists(ClientPersisterKey)) {
                     this.client = JSON.parse(this.storage.get(ClientPersisterKey));
@@ -663,9 +671,7 @@ class Crypto {
     async register(): Promise<Result<void, Error>> {
         await this.apiClient.health();
 
-        // check persisted cryptoConfig is update to date. if it's not, we should refetch and regenerate keys.
-        let isCryptoConfigUpToDate = await this.isCryptoConfigLatest();
-        if (!this.registered() || !this.bootstrapped() || !isCryptoConfigUpToDate) {
+        if (!this.registered() || !this.bootstrapped()) {
             await this.bootstrap();
         } else if (this.registered()) {
             // Nothing to return, already registered
