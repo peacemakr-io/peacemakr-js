@@ -8,7 +8,7 @@ npm install -g typescript
 ```
 ## Compile
 ```
-pushd src && tsc --build && popd
+tsc --build
 ```
 
 ## Run
@@ -22,8 +22,10 @@ python3 -m http.server 8082
 Note: Sometimes browser needs to be hard refreshed to load the changes.
 
 ## RoadMap
-- [ ] SignOnly and VerifyOnly
-- [ ] Persistent storage
+- [x] SignOnly and VerifyOnly
+- [x] Persistent storage
+- [x] Rotate client asymmetric keys
+- [x] Clean up error handling
 - [ ] Unit test
 - [ ] Deployment
 - [ ] CI/CD automation with github actions
