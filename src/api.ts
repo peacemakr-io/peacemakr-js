@@ -711,7 +711,7 @@ class Crypto {
             }
         }
         // And download all keys again
-        await this.downloadKeys();
+        // await this.downloadKeys();
         return ok();
     }
 
@@ -803,7 +803,7 @@ class Crypto {
                 }
             }
 
-            return ok(decrypted.plaintext.data);
+            return decrypted.plaintext.data;
         });
     }
 
