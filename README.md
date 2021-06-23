@@ -6,12 +6,13 @@ Peacemakr Javascript SDK
 ```
 npm install -g typescript
 ```
-## Compile
+## Compile and generate artifact
 ```
-tsc --build
+npm run build
 ```
+The generated artifact will be at `dist/` folder.
 
-## Run
+## Run example
 ```
 # replace ApiKey in index.html
 
@@ -27,5 +28,5 @@ Note: Sometimes browser needs to be hard refreshed to load the changes.
 - [x] Rotate client asymmetric keys
 - [x] Clean up error handling
 - [ ] Unit test
-- [ ] Deployment
-- [ ] CI/CD automation with github actions
+- [ ] Deployment to NPM
+- [x] CI/CD automation with github actions
