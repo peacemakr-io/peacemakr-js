@@ -8,7 +8,9 @@
 
     // *****WARNING*****: DO NOT USE LocalStoragePersister for any purpose other than testing locally
     let persister = new LocalStoragePersister();
-    const c = new Crypto("<>", persister);
+
+    // *****WARNING*****: This is the Demo Org ApiKey, please replace with your ApiKey
+    const c = new Crypto("d1Maw58P2xCQ8d0GV15n22SQNI6lYXHzWLCTEvNPHnY=", persister);
     await c.register();
 
     // uncomment this to test key rotation works in sync
