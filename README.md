@@ -4,7 +4,7 @@
   <br>
 </p>
 
-# Peacemakr E2E-Encryption-as-a-Service JavaScript SDK
+# Peacemakr E2E-Encryption JavaScript SDK
 [![CircleCI](https://circleci.com/gh/peacemakr-io/peacemakr-go-sdk/tree/master.svg?style=svg&circle-token=a5e0dd516384638b6e97cd79c7963d8081873df2)](https://circleci.com/gh/peacemakr-io/peacemakr-go-sdk/tree/master)
 
 Peacemakr's E2E-Encryption SDK simplifies your data security with E2E-Encryption service and automated key lifecycle management.
