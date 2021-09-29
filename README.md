@@ -36,6 +36,10 @@ python3 -m http.server 8082
 
 Note: Sometimes browser needs to be hard refreshed to load the changes.
 
+## Contributions
+
+Peacemakr welcomes open and active contributions to this SDK. As long as they're in the spirit of project, we will most likely accept them. However, you may want to get our opinion on proposed changes before investing time, so we can work together to solve problems you encounter that make sense for the future direction we have planned.
+
 ## RoadMap
 - [x] SignOnly and VerifyOnly
 - [x] Persistent storage
